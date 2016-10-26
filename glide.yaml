@@ -1,0 +1,4 @@
+package: tecgit01.tectusdreamlab.com/aws-slack-bot
+import:
+- package: github.com/robfig/cron
+  version: ~1.0.0
