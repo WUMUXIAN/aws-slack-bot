@@ -11,6 +11,7 @@ This bot is implemented in GO and is meant to send AWS Usage report to an integr
 
 #### Setup
 ```bash
+go get -u github.com/aws/aws-sdk-go
 glide install 
 glide up
 ```
