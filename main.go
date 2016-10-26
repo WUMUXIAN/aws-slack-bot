@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
+	"os"
+	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -42,6 +44,7 @@ func (d datapoints) Less(i, j int) bool {
 
 var estimatedCost chan float64
 var runningInstances chan int
+var slackWebhookURL string
 
 type result struct {
 	Datapoints datapoints
@@ -132,10 +135,8 @@ func messageSlack() {
 	for {
 		cost = <-estimatedCost
 		count = <-runningInstances
-		fmt.Println("Estimated Cost This Month: ", cost)
-		fmt.Println("Running Instance Count: ", count)
-
-		url := "https://hooks.slack.com/services/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"
+		// fmt.Println("Estimated Cost This Month: ", cost)
+		// fmt.Println("Running Instance Count: ", count)
 
 		payload := strings.NewReader(`
 		{
@@ -161,15 +162,16 @@ func messageSlack() {
 		}
 		`)
 
-		req, _ := http.NewRequest("POST", url, payload)
+		req, _ := http.NewRequest("POST", slackWebhookURL, payload)
 
 		req.Header.Add("content-type", "application/json")
 		req.Header.Add("cache-control", "no-cache")
 
 		res, _ := http.DefaultClient.Do(req)
 
-		defer res.Body.Close()
 		body, _ := ioutil.ReadAll(res.Body)
+
+		res.Body.Close()
 
 		fmt.Println(string(body))
 	}
@@ -185,10 +187,18 @@ func main() {
 	if runtime.GOOS == "darwin" {
 		// For debug local, every 5 seconds
 		cron.AddFunc("0/5 * * * * ?", messageSlack)
+		// Read the slack webhook url.
+		bytes, _ := ioutil.ReadFile("slack_webhook_url")
+		slackWebhookURL = string(bytes)
 	} else {
 		// From Monday to Friday, 9:00am everyday
 		cron.AddFunc("0 0 1 * * MON-FRI", messageSlack)
+		homeDir := os.Getenv("HOME")
+		bytes, _ := ioutil.ReadFile(filepath.Join(homeDir, "slack_webhook_url"))
+		slackWebhookURL = string(bytes)
 	}
+
+	// fmt.Println(slackWebhookURL)
 
 	cron.Start()
 	defer cron.Stop()
