@@ -42,7 +42,9 @@ func (d datapoints) Less(i, j int) bool {
 	return iTime.After(jTime)
 }
 
-var estimatedCost chan float64
+var estimatedCostCurrent chan float64
+var estimatedCostLast chan float64
+
 var runningInstances chan int
 var slackWebhookURL string
 
@@ -50,24 +52,18 @@ type result struct {
 	Datapoints datapoints
 }
 
-func getEstimatedCost() {
+func getEstimatedCost(startTime, endTime time.Time, estimatedCost chan<- float64) {
 	sess := session.New(&aws.Config{Region: aws.String("us-east-1")})
 
 	svc := cloudwatch.New(sess)
 
-	now := time.Now().UTC()
-	currentYear, currentMonth, _ := now.Date()
-	currentLocation := now.Location()
-	firstDayOfMonth := time.Date(currentYear, currentMonth, 1, 0, 0, 0, 0, currentLocation)
-	lastDayOfMonth := firstDayOfMonth.AddDate(0, 1, -1)
-
-	fmt.Println("Start time: ", firstDayOfMonth)
-	fmt.Println("End time: ", lastDayOfMonth)
+	fmt.Println("Start time: ", startTime)
+	fmt.Println("End time: ", endTime)
 
 	params := &cloudwatch.GetMetricStatisticsInput{
 		Namespace:  aws.String("AWS/Billing"),
-		StartTime:  aws.Time(firstDayOfMonth),
-		EndTime:    aws.Time(lastDayOfMonth),
+		StartTime:  aws.Time(startTime),
+		EndTime:    aws.Time(endTime),
 		MetricName: aws.String("EstimatedCharges"),
 		Period:     aws.Int64(86400),
 		Statistics: []*string{
@@ -127,13 +123,27 @@ func getRunningInstanceCount() {
 func messageSlack() {
 
 	go getRunningInstanceCount()
-	go getEstimatedCost()
 
-	var cost float64
+	now := time.Now().UTC()
+	currentYear, currentMonth, _ := now.Date()
+	currentLocation := now.Location()
+	firstDayOfMonth := time.Date(currentYear, currentMonth, 1, 0, 0, 0, 0, currentLocation)
+	lastDayOfMonth := firstDayOfMonth.AddDate(0, 1, -1)
+
+	go getEstimatedCost(firstDayOfMonth, lastDayOfMonth, estimatedCostCurrent)
+
+	firstDayOfMonth = firstDayOfMonth.AddDate(0, -1, 0)
+	lastDayOfMonth = firstDayOfMonth.AddDate(0, 1, -1)
+
+	go getEstimatedCost(firstDayOfMonth, lastDayOfMonth, estimatedCostLast)
+
+	var costCurrent float64
+	var costLast float64
 	var count int
 
 	for {
-		cost = <-estimatedCost
+		costCurrent = <-estimatedCostCurrent
+		costLast = <-estimatedCostLast
 		count = <-runningInstances
 		// fmt.Println("Estimated Cost This Month: ", cost)
 		// fmt.Println("Running Instance Count: ", count)
@@ -152,10 +162,15 @@ func messageSlack() {
 		               "short":false
 		            },
 		            {
-		               "title":"Estimated Cost Current Month",
-		               "value":"$` + strconv.FormatFloat(cost, 'f', 2, 64) + ` USD",
+		               "title":"Estimated Cost Last Month",
+		               "value":"$` + strconv.FormatFloat(costLast, 'f', 2, 64) + ` USD",
 		               "short":false
 		            },
+		            {
+		               "title":"Estimated Cost Current Month",
+		               "value":"$` + strconv.FormatFloat(costCurrent, 'f', 2, 64) + ` USD",
+		               "short":false
+		            },		            
 		         ]
 		      }
 		   ]
@@ -179,7 +194,8 @@ func messageSlack() {
 
 func main() {
 
-	estimatedCost = make(chan float64)
+	estimatedCostCurrent = make(chan float64)
+	estimatedCostLast = make(chan float64)
 	runningInstances = make(chan int)
 
 	cron := cron.New()
