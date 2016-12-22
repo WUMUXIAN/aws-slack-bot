@@ -1,0 +1,22 @@
+#!/bin/bash
+
+# Build the app for linux first
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -a -tags netgo -ldflags '-w' ../ 
+
+# Copy the config file
+cp -rf ../slack_webhook_url slack_webhook_url
+
+# Build the vinspection image
+docker build -t vi-dev:5000/aws-slack-bot:latest .
+
+# Remove the binary and the config file
+rm aws-slack-bot
+rm slack_webhook_url
+
+# Clear up and Push the image
+images=$(docker images -q --filter "dangling=true")
+echo $images
+if [ "$images" != "" ]; then
+docker rmi $images
+fi
+docker push vi-dev:5000/aws-slack-bot
