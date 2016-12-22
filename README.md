@@ -21,4 +21,19 @@ glide up
 2. Create a file namely *slack_webhook_url* (case sensitive) and put it at the same path as the runnable.
 
 #### Run locally (assume you're using Mac)
-make sure you have slack_webhook_url file in the directory and run.
+make sure you have slack_webhook_url file in the directory and run:
+```
+go build && ./aws-slack-bot
+```
+
+#### Deploy
+You can deploy the binary standalone or deploy it using Docker, it's your choice, the Dockerfile is in the docker/ folder,
+which can be used to build a minimum working docker image for it.
+Note that you need to setup the AWS credientials accordingly and make sure the slack_webhook_url file is at the same directory.
+If you run it standalone and if you run it using docker, you need 
+to set up the two environment variables when you run the container:
+
+```
+AWS_ACCESS_KEY_ID=your acess key
+AWS_SECRET_ACCESS_KEY=your secret
+```
