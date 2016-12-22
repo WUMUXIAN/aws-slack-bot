@@ -2,4 +2,3 @@ vendor
 aws-slack-bot
 slack_webhook_url
 inventory
-build_linux_and_deploy

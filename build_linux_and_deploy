@@ -1,0 +1,12 @@
+#!/usr/bin/env sh
+
+# Build and push the image
+cd docker
+./prepare_image
+
+# Make sure the docker-compose file are there and run it, then clean up
+cd ..
+ansible -i inventory host -u ec2-user -m file -b -a "path=./aws-slack-bot state=directory"
+ansible -i inventory host -u ec2-user -m copy -b -a "src=./docker/docker-compose.yml dest=./aws-slack-bot/docker-compose.yml"
+ansible -i inventory host -u ec2-user -m command -a "docker pull vi-dev:5000/aws-slack-bot"
+ansible -i inventory host -u ec2-user -m command -a "docker-compose up -d chdir=aws-slack-bot"

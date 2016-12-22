@@ -1,2 +1,2 @@
-#!/usr/bin/env sh
+#!/usr/bin/bash
 go build && ./aws-slack-bot
