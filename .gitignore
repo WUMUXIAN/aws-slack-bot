@@ -4,3 +4,4 @@ slack_webhook_url
 inventory
 docker/docker-compose.yml
 build_*
+glide.lock
