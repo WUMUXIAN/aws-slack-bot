@@ -90,7 +90,11 @@ func getEstimatedCost(startTime, endTime time.Time, estimatedCost chan<- float64
 	json.Unmarshal(jsonBody, &result)
 	sort.Sort(result.Datapoints)
 
-	estimatedCost <- result.Datapoints[0].Maximum
+	if len(result.Datapoints) > 0 {
+		estimatedCost <- result.Datapoints[0].Maximum
+	} else {
+		estimatedCost <- 0
+	}
 }
 
 func getRunningInstanceCount() {
