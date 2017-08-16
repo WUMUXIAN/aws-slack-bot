@@ -6,7 +6,6 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
-	"path/filepath"
 	"runtime"
 	"sort"
 	"strconv"
@@ -208,17 +207,14 @@ func main() {
 		// For debug local, every 5 seconds
 		cron.AddFunc("0/5 * * * * ?", messageSlack)
 		// Read the slack webhook url.
-		bytes, _ := ioutil.ReadFile("slack_webhook_url")
-		slackWebhookURL = string(bytes)
+		slackWebhookURL = os.Getenv("SLACK_WEBHOOK_URL")
 	} else {
 		// From Monday to Friday, 9:00am everyday
 		cron.AddFunc("0 0 1 * * MON-FRI", messageSlack)
-		homeDir := os.Getenv("HOME")
-		bytes, _ := ioutil.ReadFile(filepath.Join(homeDir, "slack_webhook_url"))
-		slackWebhookURL = string(bytes)
+		slackWebhookURL = os.Getenv("SLACK_WEBHOOK_URL")
 	}
 
-	// fmt.Println(slackWebhookURL)
+	fmt.Println(slackWebhookURL)
 
 	cron.Start()
 	defer cron.Stop()
