@@ -8,124 +8,52 @@ import (
 	"os"
 	"runtime"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"github.com/aws/aws-sdk-go/service/cloudwatch"
-	"github.com/aws/aws-sdk-go/service/ec2"
 	"github.com/robfig/cron"
 )
 
-type datapoint struct {
-	Maximum   float64
-	Timestamp string
-	Unit      string
-}
-
-type datapoints []datapoint
-
-func (d datapoints) Len() int {
-	return len(d)
-}
-
-func (d datapoints) Swap(i, j int) {
-	d[i], d[j] = d[j], d[i]
-}
-
-func (d datapoints) Less(i, j int) bool {
-	iTime, _ := time.Parse(time.RFC3339, d[i].Timestamp)
-	jTime, _ := time.Parse(time.RFC3339, d[j].Timestamp)
-	return iTime.After(jTime)
-}
-
-var estimatedCostCurrent chan float64
-var estimatedCostLast chan float64
-
-var runningInstances chan int
 var slackWebhookURL string
+
+// Channels
+var (
+	_ec2UsageChan         chan map[string]string
+	_s3UsageChan          chan map[string]string
+	_cloudFrontUsageChan  chan map[string]string
+	_rdsUsageChan         chan map[string]string
+	_elasticacheUsageChan chan map[string]string
+	_estimatedCostLast    chan float64
+	_estimatedCostCurrent chan float64
+
+	_msgSent chan bool
+)
 
 type result struct {
 	Datapoints datapoints
 }
 
-func getEstimatedCost(startTime, endTime time.Time, estimatedCost chan<- float64) {
-	sess := session.New(&aws.Config{Region: aws.String("us-east-1")})
+var sess *session.Session
 
-	svc := cloudwatch.New(sess)
-
-	fmt.Println("Start time: ", startTime)
-	fmt.Println("End time: ", endTime)
-
-	params := &cloudwatch.GetMetricStatisticsInput{
-		Namespace:  aws.String("AWS/Billing"),
-		StartTime:  aws.Time(startTime),
-		EndTime:    aws.Time(endTime),
-		MetricName: aws.String("EstimatedCharges"),
-		Period:     aws.Int64(86400),
-		Statistics: []*string{
-			aws.String("Maximum"),
-		},
-		Dimensions: []*cloudwatch.Dimension{
-			{
-				Name:  aws.String("Currency"),
-				Value: aws.String("USD"),
-			},
-		},
-	}
-
-	resp, err := svc.GetMetricStatistics(params)
-
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
-
-	jsonBody, _ := json.Marshal(resp)
-
-	var result result
-	json.Unmarshal(jsonBody, &result)
-	sort.Sort(result.Datapoints)
-
-	if len(result.Datapoints) > 0 {
-		estimatedCost <- result.Datapoints[0].Maximum
-	} else {
-		estimatedCost <- 0
-	}
+func init() {
+	sess = session.Must(session.NewSession(&aws.Config{Region: aws.String("us-east-1")}))
 }
 
-func getRunningInstanceCount() {
-	sess := session.New(&aws.Config{Region: aws.String("us-east-1")})
-
-	svc := ec2.New(sess)
-
-	resp, err := svc.DescribeInstances(&ec2.DescribeInstancesInput{
-		Filters: []*ec2.Filter{
-			{
-				Name: aws.String("instance-state-name"),
-				Values: []*string{
-					aws.String("running"),
-				},
-			},
-		},
-	})
-	if err != nil {
-		fmt.Println(err.Error())
-		return
+func getSortedKeySlice(m map[string]string) []string {
+	keys := make([]string, 0)
+	for key := range m {
+		keys = append(keys, key)
 	}
-	count := 0
-	for i := 0; i < len(resp.Reservations); i++ {
-		count += len(resp.Reservations[i].Instances)
-	}
-
-	runningInstances <- count
+	sort.Sort(sort.StringSlice(keys))
+	return keys
 }
 
 func messageSlack() {
+	<-_msgSent
 
-	go getRunningInstanceCount()
+	go getEC2Usage(sess, _ec2UsageChan)
 
 	now := time.Now().UTC()
 	currentYear, currentMonth, _ := now.Date()
@@ -133,73 +61,158 @@ func messageSlack() {
 	firstDayOfMonth := time.Date(currentYear, currentMonth, 1, 0, 0, 0, 0, currentLocation)
 	lastDayOfMonth := firstDayOfMonth.AddDate(0, 1, -1)
 
-	go getEstimatedCost(firstDayOfMonth, lastDayOfMonth, estimatedCostCurrent)
+	go getS3Usage(sess, firstDayOfMonth, lastDayOfMonth, _s3UsageChan)
+	go getCloudFrontUsage(sess, firstDayOfMonth, lastDayOfMonth, _cloudFrontUsageChan)
+	go getRDSUsage(sess, firstDayOfMonth, lastDayOfMonth, _rdsUsageChan)
+	go getElasticacheUsage(sess, firstDayOfMonth, lastDayOfMonth, _elasticacheUsageChan)
+	go getEstimatedCost(firstDayOfMonth, lastDayOfMonth, _estimatedCostCurrent)
 
 	firstDayOfMonth = firstDayOfMonth.AddDate(0, -1, 0)
 	lastDayOfMonth = firstDayOfMonth.AddDate(0, 1, -1)
+	go getEstimatedCost(firstDayOfMonth, lastDayOfMonth, _estimatedCostLast)
 
-	go getEstimatedCost(firstDayOfMonth, lastDayOfMonth, estimatedCostLast)
+	ec2Usage := <-_ec2UsageChan
+	s3Usage := <-_s3UsageChan
+	rdsUsage := <-_rdsUsageChan
+	elasticacheUsage := <-_elasticacheUsageChan
+	cloudFrontUsage := <-_cloudFrontUsageChan
+	costCurrent := <-_estimatedCostCurrent
+	costLast := <-_estimatedCostLast
 
-	var costCurrent float64
-	var costLast float64
-	var count int
+	slackAttachments := make([]SlackAttachment, 0)
 
-	for {
-		costCurrent = <-estimatedCostCurrent
-		costLast = <-estimatedCostLast
-		count = <-runningInstances
-		// fmt.Println("Estimated Cost This Month: ", cost)
-		// fmt.Println("Running Instance Count: ", count)
-
-		payload := strings.NewReader(`
-		{
-		   "attachments":[
-		      {
-		         "fallback":"AWS Usage Report",
-		         "pretext":"AWS Usage Report",
-		         "color":"#D00000",
-		         "fields":[
-		            {
-		               "title":"Running Instances",
-		               "value":"` + strconv.Itoa(count) + `",
-		               "short":false
-		            },
-		            {
-		               "title":"Estimated Cost Last Month",
-		               "value":"$` + strconv.FormatFloat(costLast, 'f', 2, 64) + ` USD",
-		               "short":false
-		            },
-		            {
-		               "title":"Estimated Cost Current Month",
-		               "value":"$` + strconv.FormatFloat(costCurrent, 'f', 2, 64) + ` USD",
-		               "short":false
-		            },		            
-		         ]
-		      }
-		   ]
-		}
-		`)
-
-		req, _ := http.NewRequest("POST", slackWebhookURL, payload)
-
-		req.Header.Add("content-type", "application/json")
-		req.Header.Add("cache-control", "no-cache")
-
-		res, _ := http.DefaultClient.Do(req)
-
-		body, _ := ioutil.ReadAll(res.Body)
-
-		res.Body.Close()
-
-		fmt.Println(string(body))
+	// Add ec2 usage
+	ec2UsageAttachment := SlackAttachment{
+		Fallback: "EC2 Usage <!channel>",
+		PreText:  "EC2 Usage <!channel>",
+		Color:    "#D00000",
+		Fields:   make([]SlackAttachmentField, 0),
 	}
+	ec2UsageKeys := getSortedKeySlice(ec2Usage)
+	for _, key := range ec2UsageKeys {
+		ec2UsageAttachment.Fields = append(ec2UsageAttachment.Fields, SlackAttachmentField{
+			Title: key,
+			Value: ec2Usage[key],
+			Short: true,
+		})
+	}
+	slackAttachments = append(slackAttachments, ec2UsageAttachment)
+
+	// Add s3 usage
+	s3UsageAttachment := SlackAttachment{
+		Fallback: "S3 Usage",
+		PreText:  "S3 Usage",
+		Color:    "#D00000",
+		Fields:   make([]SlackAttachmentField, 0),
+	}
+	s3UsageKeys := getSortedKeySlice(s3Usage)
+	for _, key := range s3UsageKeys {
+		s3UsageAttachment.Fields = append(s3UsageAttachment.Fields, SlackAttachmentField{
+			Title: key,
+			Value: s3Usage[key],
+			Short: true,
+		})
+	}
+	slackAttachments = append(slackAttachments, s3UsageAttachment)
+
+	// Add cloudfront usage
+	cloudFrontUsageAttachment := SlackAttachment{
+		Fallback: "CloudFront Usage",
+		PreText:  "CloudFront Usage",
+		Color:    "#D00000",
+		Fields:   make([]SlackAttachmentField, 0),
+	}
+	cloudFrontUsageKeys := getSortedKeySlice(cloudFrontUsage)
+	for _, key := range cloudFrontUsageKeys {
+		cloudFrontUsageAttachment.Fields = append(cloudFrontUsageAttachment.Fields, SlackAttachmentField{
+			Title: key,
+			Value: cloudFrontUsage[key],
+			Short: true,
+		})
+	}
+	slackAttachments = append(slackAttachments, cloudFrontUsageAttachment)
+
+	// Add RDS usage
+	rdsUsageAttachment := SlackAttachment{
+		Fallback: "RDS Usage",
+		PreText:  "RDS Usage",
+		Color:    "#D00000",
+		Fields:   make([]SlackAttachmentField, 0),
+	}
+	rdsUsageKeys := getSortedKeySlice(rdsUsage)
+	for _, key := range rdsUsageKeys {
+		rdsUsageAttachment.Fields = append(rdsUsageAttachment.Fields, SlackAttachmentField{
+			Title: key,
+			Value: rdsUsage[key],
+			Short: true,
+		})
+	}
+	slackAttachments = append(slackAttachments, rdsUsageAttachment)
+
+	// Add ElastiCache usage
+	elasticacheUsageAttachment := SlackAttachment{
+		Fallback: "Elasticache Usage",
+		PreText:  "Elasticache Usage",
+		Color:    "#D00000",
+		Fields:   make([]SlackAttachmentField, 0),
+	}
+	elasticacheUsageKeys := getSortedKeySlice(elasticacheUsage)
+	for _, key := range elasticacheUsageKeys {
+		elasticacheUsageAttachment.Fields = append(elasticacheUsageAttachment.Fields, SlackAttachmentField{
+			Title: key,
+			Value: elasticacheUsage[key],
+			Short: true,
+		})
+	}
+	slackAttachments = append(slackAttachments, elasticacheUsageAttachment)
+
+	// Add cost estimation
+	costEstimationAttachment := SlackAttachment{
+		Fallback: "Estimated Cost",
+		PreText:  "Estimated Cost",
+		Color:    "#D00000",
+		Fields:   make([]SlackAttachmentField, 0),
+	}
+	costEstimationAttachment.Fields = append(costEstimationAttachment.Fields, SlackAttachmentField{
+		Title: "Current Month",
+		Value: fmt.Sprintf("$%.02f USD", costCurrent),
+		Short: true,
+	})
+	costEstimationAttachment.Fields = append(costEstimationAttachment.Fields, SlackAttachmentField{
+		Title: "Last Month",
+		Value: fmt.Sprintf("$%.02f USD", costLast),
+		Short: true,
+	})
+
+	slackAttachments = append(slackAttachments, costEstimationAttachment)
+
+	slackAttachmentsBytes, _ := json.Marshal(SlackAttachments{Attacments: slackAttachments})
+	fmt.Println(string(slackAttachmentsBytes))
+
+	// call slack webhook URL.
+	payload := strings.NewReader(string(slackAttachmentsBytes))
+	req, _ := http.NewRequest("POST", slackWebhookURL, payload)
+	req.Header.Add("content-type", "application/json")
+	req.Header.Add("cache-control", "no-cache")
+	res, _ := http.DefaultClient.Do(req)
+	body, _ := ioutil.ReadAll(res.Body)
+	res.Body.Close()
+	fmt.Println(string(body))
+
+	_msgSent <- true
 }
 
 func main() {
 
-	estimatedCostCurrent = make(chan float64)
-	estimatedCostLast = make(chan float64)
-	runningInstances = make(chan int)
+	_estimatedCostCurrent = make(chan float64)
+	_estimatedCostLast = make(chan float64)
+	_ec2UsageChan = make(chan map[string]string)
+	_s3UsageChan = make(chan map[string]string)
+	_cloudFrontUsageChan = make(chan map[string]string)
+	_elasticacheUsageChan = make(chan map[string]string)
+	_rdsUsageChan = make(chan map[string]string)
+
+	_msgSent = make(chan bool)
 
 	cron := cron.New()
 
@@ -218,6 +231,8 @@ func main() {
 
 	cron.Start()
 	defer cron.Stop()
+
+	_msgSent <- false
 
 	holder := make(chan int)
 	for {
