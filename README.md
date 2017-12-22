@@ -2,17 +2,22 @@
 
 This bot is implemented in GO and is meant to send AWS Usage report to an integrated slack channel every day at 9:00am (Singapore time) from Monday to Friday. For now the following information is reported:
 
-1. Number of running instances. (us-east-1)
-2. Estimated cost for current month.
+1. EC2 Usage.
+2. S3 Usage.
+3. CloudFront Usage.
+4. RDS Usage.
+5. Elasticache Usage.
+6. Estimated Cost.
+
+At the moment, it supports us-east-1 only, it will be changed to adopt any region you specify in the future.
 
 #### Dependencies
-* [Go](https://golang.org/doc/install) 
+* [Go](https://golang.org/doc/install)
 * [Glide](https://github.com/Masterminds/glide)
 
 #### Setup
 ```bash
-go get -u github.com/aws/aws-sdk-go
-glide install 
+glide install
 glide up
 ```
 
@@ -30,7 +35,7 @@ go build && ./aws-slack-bot
 You can deploy the binary standalone or deploy it using Docker, it's your choice, the Dockerfile is in the docker/ folder,
 which can be used to build a minimum working docker image for it.
 Note that you need to setup the AWS credientials accordingly and make sure the slack_webhook_url file is at the same directory.
-If you run it standalone and if you run it using docker, you need 
+If you run it standalone and if you run it using docker, you need
 to set up the two environment variables when you run the container:
 
 ```
