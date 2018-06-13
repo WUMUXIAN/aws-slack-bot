@@ -1,3 +1,5 @@
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/WUMUXIAN/aws-slack-bot/blob/master/LICENSE)
+
 ### aws-slack-bot
 
 This bot is implemented in golang and is meant to send AWS Usage report to an integrated slack channel every day at 9:00am (UTC+8 TZ) from Monday to Friday. For now the following information is reported:
