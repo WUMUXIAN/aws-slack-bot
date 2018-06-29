@@ -1,4 +1,4 @@
-package main
+package stats
 
 import (
 	"fmt"
@@ -10,8 +10,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/s3"
 )
 
-func getS3Usage(sess *session.Session, startTime, endTime time.Time, s3UsageChan chan map[string]string) {
-	s3Usage := make(map[string]string)
+// GetS3Usage gets the S3 usage for given session within specified period of time.
+func GetS3Usage(sess *session.Session, startTime, endTime time.Time) (s3Usage map[string]string) {
+	s3Usage = make(map[string]string)
 
 	svc := s3.New(sess)
 
@@ -46,5 +47,5 @@ func getS3Usage(sess *session.Session, startTime, endTime time.Time, s3UsageChan
 		}
 	}
 
-	s3UsageChan <- s3Usage
+	return s3Usage
 }

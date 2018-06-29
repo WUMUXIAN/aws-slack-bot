@@ -1,4 +1,4 @@
-package main
+package stats
 
 import (
 	"encoding/json"
@@ -9,6 +9,20 @@ import (
 	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/service/cloudwatch"
 )
+
+type result struct {
+	Datapoints datapoints
+}
+
+// GetSortedKeySlice gets sorted key slices from a map
+func GetSortedKeySlice(m map[string]string) []string {
+	keys := make([]string, 0)
+	for key := range m {
+		keys = append(keys, key)
+	}
+	sort.Sort(sort.StringSlice(keys))
+	return keys
+}
 
 func getMetricsStatistics(svcCloudWatch *cloudwatch.CloudWatch, startTime, endTime time.Time, nameSpace, metricsName *string, statistics string, demensions []*cloudwatch.Dimension) []float64 {
 	respGetMetricStatistics, err := svcCloudWatch.GetMetricStatistics(&cloudwatch.GetMetricStatisticsInput{

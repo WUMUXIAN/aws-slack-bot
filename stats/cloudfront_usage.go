@@ -1,4 +1,4 @@
-package main
+package stats
 
 import (
 	"fmt"
@@ -9,8 +9,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/cloudwatch"
 )
 
-func getCloudFrontUsage(sess *session.Session, startTime, endTime time.Time, cloudFrontUsageChan chan map[string]string) {
-	cloudFrontUsage := make(map[string]string)
+// GetCloudFrontUsage gets cloudfront usage for given session within specified period of time.
+func GetCloudFrontUsage(sess *session.Session, startTime, endTime time.Time) (cloudFrontUsage map[string]string) {
+	cloudFrontUsage = make(map[string]string)
 	svc := cloudwatch.New(sess)
 
 	interestedMetrics := make([]*cloudwatch.Metric, 0)
@@ -53,5 +54,5 @@ func getCloudFrontUsage(sess *session.Session, startTime, endTime time.Time, clo
 	cloudFrontUsage["Request Count"] = fmt.Sprintf("%0.2f/Day", requests)
 	cloudFrontUsage["Downloaded Size"] = fmt.Sprintf("%s/Day", formatStorage(downloads))
 
-	cloudFrontUsageChan <- cloudFrontUsage
+	return cloudFrontUsage
 }

@@ -1,4 +1,4 @@
-package main
+package stats
 
 import (
 	"encoding/json"
@@ -7,10 +7,12 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cloudwatch"
 )
 
-func getEstimatedCost(startTime, endTime time.Time, estimatedCost chan<- float64) {
+// GetEstimatedCost calculates estimated cost for given session within specified period of time
+func GetEstimatedCost(sess *session.Session, startTime, endTime time.Time) float64 {
 	svc := cloudwatch.New(sess)
 
 	fmt.Println("Start time: ", startTime)
@@ -37,7 +39,7 @@ func getEstimatedCost(startTime, endTime time.Time, estimatedCost chan<- float64
 
 	if err != nil {
 		fmt.Println(err.Error())
-		return
+		return 0
 	}
 
 	jsonBody, _ := json.Marshal(resp)
@@ -47,8 +49,8 @@ func getEstimatedCost(startTime, endTime time.Time, estimatedCost chan<- float64
 	sort.Sort(result.Datapoints)
 
 	if len(result.Datapoints) > 0 {
-		estimatedCost <- result.Datapoints[0].Maximum
+		return result.Datapoints[0].Maximum
 	} else {
-		estimatedCost <- 0
+		return 0
 	}
 }

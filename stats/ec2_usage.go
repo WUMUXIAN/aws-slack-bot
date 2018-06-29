@@ -1,4 +1,4 @@
-package main
+package stats
 
 import (
 	"fmt"
@@ -11,8 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/elb"
 )
 
-func getEC2Usage(sess *session.Session, ec2UsageChan chan map[string]string) {
-	ec2Usage := make(map[string]string)
+// GetEC2Usage gets EC2 usage for given session.
+func GetEC2Usage(sess *session.Session) (ec2Usage map[string]string) {
+	ec2Usage = make(map[string]string)
 
 	svc := ec2.New(sess)
 	// Get running instances
@@ -91,5 +92,5 @@ func getEC2Usage(sess *session.Session, ec2UsageChan chan map[string]string) {
 		ec2Usage["Load Balancers"] = strconv.Itoa(count)
 	}
 
-	ec2UsageChan <- ec2Usage
+	return ec2Usage
 }

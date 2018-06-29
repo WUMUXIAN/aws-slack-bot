@@ -1,4 +1,4 @@
-package main
+package stats
 
 import (
 	"fmt"
@@ -11,8 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/elasticache"
 )
 
-func getElasticacheUsage(sess *session.Session, startTime, endTime time.Time, elasticacheUsageChan chan map[string]string) {
-	elasticacheUsage := make(map[string]string)
+// GetElasticacheUsage gets elasticache usage for given sessions within specified period of time.
+func GetElasticacheUsage(sess *session.Session, startTime, endTime time.Time) (elasticacheUsage map[string]string) {
+	elasticacheUsage = make(map[string]string)
 
 	svc := elasticache.New(sess)
 	respDescribeReplicationGroups, err := svc.DescribeReplicationGroups(&elasticache.DescribeReplicationGroupsInput{})
@@ -48,5 +49,5 @@ func getElasticacheUsage(sess *session.Session, startTime, endTime time.Time, el
 	bytes := getMetricsStatistics(svcCloudWatch, startTime, endTime, aws.String("AWS/ElastiCache"), aws.String("BytesUsedForCache"), "Average", []*cloudwatch.Dimension{})[0]
 	elasticacheUsage["Cache Size"] = formatStorage(bytes)
 
-	elasticacheUsageChan <- elasticacheUsage
+	return elasticacheUsage
 }

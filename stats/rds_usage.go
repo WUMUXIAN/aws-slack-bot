@@ -1,4 +1,4 @@
-package main
+package stats
 
 import (
 	"fmt"
@@ -11,8 +11,9 @@ import (
 	"github.com/aws/aws-sdk-go/service/rds"
 )
 
-func getRDSUsage(sess *session.Session, startTime, endTime time.Time, RDSUsageChan chan map[string]string) {
-	RDSUsage := make(map[string]string)
+// GetRDSUsage gets RDS usage for given sessions within specified period of time.
+func GetRDSUsage(sess *session.Session, startTime, endTime time.Time) (RDSUsage map[string]string) {
+	RDSUsage = make(map[string]string)
 
 	svc := rds.New(sess)
 
@@ -50,5 +51,5 @@ func getRDSUsage(sess *session.Session, startTime, endTime time.Time, RDSUsageCh
 	deadlocks := getMetricsStatistics(svcCloudWatch, startTime, endTime, aws.String("AWS/RDS"), aws.String("Deadlocks"), "Average", []*cloudwatch.Dimension{})[0]
 	RDSUsage["Deadlocks"] = fmt.Sprintf("%0.2f/Second", deadlocks)
 
-	RDSUsageChan <- RDSUsage
+	return RDSUsage
 }
