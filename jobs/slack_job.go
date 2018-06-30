@@ -10,211 +10,219 @@ import (
 	"time"
 
 	"github.com/WUMUXIAN/aws-slack-bot/stats"
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/session"
 )
 
+// RegionUsage represents the various resource usage of a region.
+type RegionUsage struct {
+	Sess                 *session.Session
+	ec2UsageChan         chan map[string]string
+	s3UsageChan          chan map[string]string
+	cloudFrontUsageChan  chan map[string]string
+	elasticacheUsageChan chan map[string]string
+	rdsUsageChan         chan map[string]string
+}
+
 // SlackJob defines a slack cron job
 type SlackJob struct {
-	Sess            *session.Session
-	SlackWebhookURL string
+	regionUsage     map[string]RegionUsage
+	costCurrentChan chan float64
+	costLastChan    chan float64
+	slackWebhookURL string
+}
+
+func NewSlackJob(regions []string, webhookURL string) SlackJob {
+	slackJob := SlackJob{
+		regionUsage:     make(map[string]RegionUsage),
+		slackWebhookURL: webhookURL,
+		costCurrentChan: make(chan float64),
+		costLastChan:    make(chan float64),
+	}
+	for _, region := range regions {
+		sess := session.Must(session.NewSession(&aws.Config{Region: aws.String(region)}))
+		slackJob.regionUsage[region] = RegionUsage{
+			Sess:                 sess,
+			ec2UsageChan:         make(chan map[string]string),
+			s3UsageChan:          make(chan map[string]string),
+			cloudFrontUsageChan:  make(chan map[string]string),
+			elasticacheUsageChan: make(chan map[string]string),
+			rdsUsageChan:         make(chan map[string]string),
+		}
+	}
+	return slackJob
 }
 
 // Run runs the slack cron job.
 func (o SlackJob) Run() {
-	estimatedCostCurrent := make(chan float64)
-	estimatedCostLast := make(chan float64)
-	ec2UsageChan := make(chan map[string]string)
-	s3UsageChan := make(chan map[string]string)
-	cloudFrontUsageChan := make(chan map[string]string)
-	elasticacheUsageChan := make(chan map[string]string)
-	rdsUsageChan := make(chan map[string]string)
-	costCurrentChan := make(chan float64)
-	costLastChan := make(chan float64)
-	// _msgSent = make(chan bool)
-
-	// cron := cron.New()
-	//
-	// if runtime.GOOS == "darwin" {
-	// 	// For debug local, every 5 seconds
-	// 	cron.AddFunc("0/5 * * * * ?", messageSlack)
-	// 	// Read the slack webhook url.
-	// 	slackWebhookURL = os.Getenv("SLACK_WEBHOOK_URL")
-	// } else {
-	// 	// From Monday to Friday, 9:00am everyday
-	// 	cron.AddFunc("0 0 1 * * MON-FRI", messageSlack)
-	// 	slackWebhookURL = os.Getenv("SLACK_WEBHOOK_URL")
-	// }
-
-	// fmt.Println(slackWebhookURL)
-	//
-	// cron.Start()
-	// defer cron.Stop()
-
-	// _msgSent <- false
-
-	// <-_msgSent
-
 	// Get EC2 usage for current session
-	go func() {
-		ec2UsageChan <- stats.GetEC2Usage(o.Sess)
-	}()
+	for _, usage := range o.regionUsage {
+		go func() {
+			usage.ec2UsageChan <- stats.GetEC2Usage(usage.Sess)
+		}()
 
-	now := time.Now().UTC()
-	currentYear, currentMonth, _ := now.Date()
-	currentLocation := now.Location()
-	firstDayOfMonth := time.Date(currentYear, currentMonth, 1, 0, 0, 0, 0, currentLocation)
-	lastDayOfMonth := firstDayOfMonth.AddDate(0, 1, -1)
-	go func() {
-		s3UsageChan <- stats.GetS3Usage(o.Sess, firstDayOfMonth, lastDayOfMonth)
-	}()
-	go func() {
-		cloudFrontUsageChan <- stats.GetCloudFrontUsage(o.Sess, firstDayOfMonth, lastDayOfMonth)
-	}()
-	go func() {
-		rdsUsageChan <- stats.GetRDSUsage(o.Sess, firstDayOfMonth, lastDayOfMonth)
-	}()
-	go func() {
-		elasticacheUsageChan <- stats.GetElasticacheUsage(o.Sess, firstDayOfMonth, lastDayOfMonth)
-	}()
-	go func() {
-		costCurrentChan <- stats.GetEstimatedCost(o.Sess, firstDayOfMonth, lastDayOfMonth)
-	}()
+		now := time.Now().UTC()
+		currentYear, currentMonth, _ := now.Date()
+		currentLocation := now.Location()
+		firstDayOfMonth := time.Date(currentYear, currentMonth, 1, 0, 0, 0, 0, currentLocation)
+		lastDayOfMonth := firstDayOfMonth.AddDate(0, 1, -1)
+		go func() {
+			usage.s3UsageChan <- stats.GetS3Usage(usage.Sess, firstDayOfMonth, lastDayOfMonth)
+		}()
+		go func() {
+			usage.cloudFrontUsageChan <- stats.GetCloudFrontUsage(usage.Sess, firstDayOfMonth, lastDayOfMonth)
+		}()
+		go func() {
+			usage.rdsUsageChan <- stats.GetRDSUsage(usage.Sess, firstDayOfMonth, lastDayOfMonth)
+		}()
+		go func() {
+			usage.elasticacheUsageChan <- stats.GetElasticacheUsage(usage.Sess, firstDayOfMonth, lastDayOfMonth)
+		}()
+		go func() {
+			o.costCurrentChan <- stats.GetEstimatedCost(usage.Sess, firstDayOfMonth, lastDayOfMonth)
+		}()
 
-	firstDayOfMonth = firstDayOfMonth.AddDate(0, -1, 0)
-	lastDayOfMonth = firstDayOfMonth.AddDate(0, 1, -1)
-	go func() {
-		costLastChan <- stats.GetEstimatedCost(o.Sess, firstDayOfMonth, lastDayOfMonth)
-	}()
+		firstDayOfMonth = firstDayOfMonth.AddDate(0, -1, 0)
+		lastDayOfMonth = firstDayOfMonth.AddDate(0, 1, -1)
+		go func() {
+			o.costLastChan <- stats.GetEstimatedCost(usage.Sess, firstDayOfMonth, lastDayOfMonth)
+		}()
 
-	ec2Usage := <-ec2UsageChan
-	s3Usage := <-s3UsageChan
-	rdsUsage := <-rdsUsageChan
-	elasticacheUsage := <-elasticacheUsageChan
-	cloudFrontUsage := <-cloudFrontUsageChan
-	costCurrent := <-estimatedCostCurrent
-	costLast := <-estimatedCostLast
+		ec2Usage := <-usage.ec2UsageChan
+		s3Usage := <-usage.s3UsageChan
+		rdsUsage := <-usage.rdsUsageChan
+		elasticacheUsage := <-usage.elasticacheUsageChan
+		cloudFrontUsage := <-usage.cloudFrontUsageChan
+		costCurrent := <-o.costCurrentChan
+		costLast := <-o.costLastChan
 
-	slackAttachments := make([]SlackAttachment, 0)
+		slackAttachments := make([]SlackAttachment, 0)
 
-	// Add ec2 usage
-	ec2UsageAttachment := SlackAttachment{
-		Fallback: "EC2 Usage <!channel>",
-		PreText:  "EC2 Usage <!channel>",
-		Color:    "#D00000",
-		Fields:   make([]SlackAttachmentField, 0),
-	}
-	ec2UsageKeys := stats.GetSortedKeySlice(ec2Usage)
-	for _, key := range ec2UsageKeys {
-		ec2UsageAttachment.Fields = append(ec2UsageAttachment.Fields, SlackAttachmentField{
-			Title: key,
-			Value: ec2Usage[key],
+		// regionTitle := SlackAttachment{
+		// 	Fallback: "EC2 Usage <!channel>",
+		// 	PreText:  "EC2 Usage <!channel>",
+		// 	Color:    "#D00000",
+		// 	Fields:   make([]SlackAttachmentField, 0),
+		// }
+
+		// Add ec2 usage
+		ec2UsageAttachment := SlackAttachment{
+			Fallback: "EC2 Usage <!channel>",
+			PreText:  "EC2 Usage <!channel>",
+			Color:    "#D00000",
+			Fields:   make([]SlackAttachmentField, 0),
+		}
+		ec2UsageKeys := stats.GetSortedKeySlice(ec2Usage)
+		for _, key := range ec2UsageKeys {
+			ec2UsageAttachment.Fields = append(ec2UsageAttachment.Fields, SlackAttachmentField{
+				Title: key,
+				Value: ec2Usage[key],
+				Short: true,
+			})
+		}
+		slackAttachments = append(slackAttachments, ec2UsageAttachment)
+
+		// Add s3 usage
+		s3UsageAttachment := SlackAttachment{
+			Fallback: "S3 Usage",
+			PreText:  "S3 Usage",
+			Color:    "#D00000",
+			Fields:   make([]SlackAttachmentField, 0),
+		}
+		s3UsageKeys := stats.GetSortedKeySlice(s3Usage)
+		for _, key := range s3UsageKeys {
+			s3UsageAttachment.Fields = append(s3UsageAttachment.Fields, SlackAttachmentField{
+				Title: key,
+				Value: s3Usage[key],
+				Short: true,
+			})
+		}
+		slackAttachments = append(slackAttachments, s3UsageAttachment)
+
+		// Add cloudfront usage
+		cloudFrontUsageAttachment := SlackAttachment{
+			Fallback: "CloudFront Usage",
+			PreText:  "CloudFront Usage",
+			Color:    "#D00000",
+			Fields:   make([]SlackAttachmentField, 0),
+		}
+		cloudFrontUsageKeys := stats.GetSortedKeySlice(cloudFrontUsage)
+		for _, key := range cloudFrontUsageKeys {
+			cloudFrontUsageAttachment.Fields = append(cloudFrontUsageAttachment.Fields, SlackAttachmentField{
+				Title: key,
+				Value: cloudFrontUsage[key],
+				Short: true,
+			})
+		}
+		slackAttachments = append(slackAttachments, cloudFrontUsageAttachment)
+
+		// Add RDS usage
+		rdsUsageAttachment := SlackAttachment{
+			Fallback: "RDS Usage",
+			PreText:  "RDS Usage",
+			Color:    "#D00000",
+			Fields:   make([]SlackAttachmentField, 0),
+		}
+		rdsUsageKeys := stats.GetSortedKeySlice(rdsUsage)
+		for _, key := range rdsUsageKeys {
+			rdsUsageAttachment.Fields = append(rdsUsageAttachment.Fields, SlackAttachmentField{
+				Title: key,
+				Value: rdsUsage[key],
+				Short: true,
+			})
+		}
+		slackAttachments = append(slackAttachments, rdsUsageAttachment)
+
+		// Add ElastiCache usage
+		elasticacheUsageAttachment := SlackAttachment{
+			Fallback: "Elasticache Usage",
+			PreText:  "Elasticache Usage",
+			Color:    "#D00000",
+			Fields:   make([]SlackAttachmentField, 0),
+		}
+		elasticacheUsageKeys := stats.GetSortedKeySlice(elasticacheUsage)
+		for _, key := range elasticacheUsageKeys {
+			elasticacheUsageAttachment.Fields = append(elasticacheUsageAttachment.Fields, SlackAttachmentField{
+				Title: key,
+				Value: elasticacheUsage[key],
+				Short: true,
+			})
+		}
+		slackAttachments = append(slackAttachments, elasticacheUsageAttachment)
+
+		// Add cost estimation
+		costEstimationAttachment := SlackAttachment{
+			Fallback: "Estimated Cost",
+			PreText:  "Estimated Cost",
+			Color:    "#D00000",
+			Fields:   make([]SlackAttachmentField, 0),
+		}
+		costEstimationAttachment.Fields = append(costEstimationAttachment.Fields, SlackAttachmentField{
+			Title: "Current Month",
+			Value: fmt.Sprintf("$%.02f USD", costCurrent),
 			Short: true,
 		})
-	}
-	slackAttachments = append(slackAttachments, ec2UsageAttachment)
-
-	// Add s3 usage
-	s3UsageAttachment := SlackAttachment{
-		Fallback: "S3 Usage",
-		PreText:  "S3 Usage",
-		Color:    "#D00000",
-		Fields:   make([]SlackAttachmentField, 0),
-	}
-	s3UsageKeys := stats.GetSortedKeySlice(s3Usage)
-	for _, key := range s3UsageKeys {
-		s3UsageAttachment.Fields = append(s3UsageAttachment.Fields, SlackAttachmentField{
-			Title: key,
-			Value: s3Usage[key],
+		costEstimationAttachment.Fields = append(costEstimationAttachment.Fields, SlackAttachmentField{
+			Title: "Last Month",
+			Value: fmt.Sprintf("$%.02f USD", costLast),
 			Short: true,
 		})
-	}
-	slackAttachments = append(slackAttachments, s3UsageAttachment)
 
-	// Add cloudfront usage
-	cloudFrontUsageAttachment := SlackAttachment{
-		Fallback: "CloudFront Usage",
-		PreText:  "CloudFront Usage",
-		Color:    "#D00000",
-		Fields:   make([]SlackAttachmentField, 0),
-	}
-	cloudFrontUsageKeys := stats.GetSortedKeySlice(cloudFrontUsage)
-	for _, key := range cloudFrontUsageKeys {
-		cloudFrontUsageAttachment.Fields = append(cloudFrontUsageAttachment.Fields, SlackAttachmentField{
-			Title: key,
-			Value: cloudFrontUsage[key],
-			Short: true,
-		})
-	}
-	slackAttachments = append(slackAttachments, cloudFrontUsageAttachment)
+		slackAttachments = append(slackAttachments, costEstimationAttachment)
 
-	// Add RDS usage
-	rdsUsageAttachment := SlackAttachment{
-		Fallback: "RDS Usage",
-		PreText:  "RDS Usage",
-		Color:    "#D00000",
-		Fields:   make([]SlackAttachmentField, 0),
+		slackAttachmentsBytes, _ := json.Marshal(SlackAttachments{Attacments: slackAttachments})
+		fmt.Println(string(slackAttachmentsBytes))
+
+		// call slack webhook URL.
+		payload := strings.NewReader(string(slackAttachmentsBytes))
+		req, _ := http.NewRequest("POST", o.slackWebhookURL, payload)
+		req.Header.Add("content-type", "application/json")
+		req.Header.Add("cache-control", "no-cache")
+		res, _ := http.DefaultClient.Do(req)
+		body, _ := ioutil.ReadAll(res.Body)
+		res.Body.Close()
+		fmt.Println(string(body))
 	}
-	rdsUsageKeys := stats.GetSortedKeySlice(rdsUsage)
-	for _, key := range rdsUsageKeys {
-		rdsUsageAttachment.Fields = append(rdsUsageAttachment.Fields, SlackAttachmentField{
-			Title: key,
-			Value: rdsUsage[key],
-			Short: true,
-		})
-	}
-	slackAttachments = append(slackAttachments, rdsUsageAttachment)
-
-	// Add ElastiCache usage
-	elasticacheUsageAttachment := SlackAttachment{
-		Fallback: "Elasticache Usage",
-		PreText:  "Elasticache Usage",
-		Color:    "#D00000",
-		Fields:   make([]SlackAttachmentField, 0),
-	}
-	elasticacheUsageKeys := stats.GetSortedKeySlice(elasticacheUsage)
-	for _, key := range elasticacheUsageKeys {
-		elasticacheUsageAttachment.Fields = append(elasticacheUsageAttachment.Fields, SlackAttachmentField{
-			Title: key,
-			Value: elasticacheUsage[key],
-			Short: true,
-		})
-	}
-	slackAttachments = append(slackAttachments, elasticacheUsageAttachment)
-
-	// Add cost estimation
-	costEstimationAttachment := SlackAttachment{
-		Fallback: "Estimated Cost",
-		PreText:  "Estimated Cost",
-		Color:    "#D00000",
-		Fields:   make([]SlackAttachmentField, 0),
-	}
-	costEstimationAttachment.Fields = append(costEstimationAttachment.Fields, SlackAttachmentField{
-		Title: "Current Month",
-		Value: fmt.Sprintf("$%.02f USD", costCurrent),
-		Short: true,
-	})
-	costEstimationAttachment.Fields = append(costEstimationAttachment.Fields, SlackAttachmentField{
-		Title: "Last Month",
-		Value: fmt.Sprintf("$%.02f USD", costLast),
-		Short: true,
-	})
-
-	slackAttachments = append(slackAttachments, costEstimationAttachment)
-
-	slackAttachmentsBytes, _ := json.Marshal(SlackAttachments{Attacments: slackAttachments})
-	fmt.Println(string(slackAttachmentsBytes))
-
-	// call slack webhook URL.
-	payload := strings.NewReader(string(slackAttachmentsBytes))
-	req, _ := http.NewRequest("POST", o.SlackWebhookURL, payload)
-	req.Header.Add("content-type", "application/json")
-	req.Header.Add("cache-control", "no-cache")
-	res, _ := http.DefaultClient.Do(req)
-	body, _ := ioutil.ReadAll(res.Body)
-	res.Body.Close()
-	fmt.Println(string(body))
-
-	// _msgSent <- true
 }
 
 // SlackAttachmentField defines a slack attachment field
