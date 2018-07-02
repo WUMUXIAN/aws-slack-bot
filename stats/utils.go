@@ -44,12 +44,12 @@ func getMetricsStatistics(svcCloudWatch *cloudwatch.CloudWatch, startTime, endTi
 	} else {
 		jsonBody, _ := json.Marshal(respGetMetricStatistics)
 
-		var result result
-		json.Unmarshal(jsonBody, &result)
-		sort.Sort(result.Datapoints)
+		var s result
+		json.Unmarshal(jsonBody, &s)
+		sort.Sort(s.Datapoints)
 
-		if len(result.Datapoints) > 0 {
-			for _, dp := range result.Datapoints {
+		if len(s.Datapoints) > 0 {
+			for _, dp := range s.Datapoints {
 				switch statistics {
 				case "Sum":
 					stats = append(stats, dp.Sum)

@@ -1,3 +1,4 @@
+// Package stats contains functions to gather usage stats of different services and consolidated billing estimations.
 package stats
 
 import (
