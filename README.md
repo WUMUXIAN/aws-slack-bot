@@ -72,7 +72,7 @@ dep ensure
 
 #### Run locally
 ```bash
-./run.sh
+go run *.go
 ```
 
 #### Build docker image
