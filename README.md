@@ -1,4 +1,6 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/WUMUXIAN/aws-slack-bot/blob/master/LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/WUMUXIAN/aws-slack-bot)](https://goreportcard.com/report/github.com/WUMUXIAN/aws-slack-bot)
+[![GoDoc](https://godoc.org/github.com/WUMUXIAN/aws-slack-bot?status.svg)](https://godoc.org/github.com/WUMUXIAN/aws-slack-bot)
 
 ### aws-slack-bot
 

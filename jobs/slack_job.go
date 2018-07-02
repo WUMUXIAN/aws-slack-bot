@@ -34,6 +34,7 @@ type SlackJob struct {
 	slackWebhookURL string
 }
 
+// NewSlackJob creates a new slack cron job.
 func NewSlackJob(regions []string, webhookURL string) SlackJob {
 	slackJob := SlackJob{
 		regionUsage:     make(map[string]RegionUsage),
