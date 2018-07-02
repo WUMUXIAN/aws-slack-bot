@@ -11,12 +11,12 @@ import (
 	"github.com/aws/aws-sdk-go/service/cloudwatch"
 )
 
-// GetEstimatedCost calculates estimated cost for given session within specified period of time
-func GetEstimatedCost(sess *session.Session, startTime, endTime time.Time) float64 {
+// GetEstimatedBilling calculates estimated billing for given session within specified period of time
+func GetEstimatedBilling(sess *session.Session, startTime, endTime time.Time) (latest float64, latestDiff float64) {
 	svc := cloudwatch.New(sess)
 
-	fmt.Println("Start time: ", startTime)
-	fmt.Println("End time: ", endTime)
+	// fmt.Println("Start time: ", startTime)
+	// fmt.Println("End time: ", endTime)
 
 	params := &cloudwatch.GetMetricStatisticsInput{
 		Namespace:  aws.String("AWS/Billing"),
@@ -39,7 +39,7 @@ func GetEstimatedCost(sess *session.Session, startTime, endTime time.Time) float
 
 	if err != nil {
 		fmt.Println(err.Error())
-		return 0
+		return 0, 0
 	}
 
 	jsonBody, _ := json.Marshal(resp)
@@ -48,9 +48,16 @@ func GetEstimatedCost(sess *session.Session, startTime, endTime time.Time) float
 	json.Unmarshal(jsonBody, &result)
 	sort.Sort(result.Datapoints)
 
+	// fmt.Println(result.Datapoints)
+
 	if len(result.Datapoints) > 0 {
-		return result.Datapoints[0].Maximum
-	} else {
-		return 0
+		latest = result.Datapoints[0].Maximum
+
+		if len(result.Datapoints) > 1 && latest > result.Datapoints[1].Maximum {
+			latestDiff = latest - result.Datapoints[1].Maximum
+		} else {
+			latestDiff = latest
+		}
 	}
+	return
 }

@@ -51,8 +51,12 @@ func GetCloudFrontUsage(sess *session.Session, startTime, endTime time.Time) (cl
 			}
 		}
 	}
-	cloudFrontUsage["Request Count"] = fmt.Sprintf("%0.2f/Day", requests)
-	cloudFrontUsage["Downloaded Size"] = fmt.Sprintf("%s/Day", formatStorage(downloads))
+	if requests > 0 {
+		cloudFrontUsage["Request Count"] = fmt.Sprintf("%0.2f/Day", requests)
+	}
+	if downloads > 0 {
+		cloudFrontUsage["Downloaded Size"] = fmt.Sprintf("%s/Day", formatStorage(downloads))
+	}
 
 	return cloudFrontUsage
 }

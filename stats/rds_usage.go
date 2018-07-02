@@ -22,7 +22,10 @@ func GetRDSUsage(sess *session.Session, startTime, endTime time.Time) (RDSUsage 
 	if err != nil {
 		fmt.Println(err.Error())
 	} else {
-		RDSUsage["Clusters"] = strconv.Itoa(len(respDescribeDBClusters.DBClusters))
+		count := len(respDescribeDBClusters.DBClusters)
+		if count > 0 {
+			RDSUsage["Clusters"] = strconv.Itoa(count)
+		}
 	}
 
 	// List DB Instances
@@ -30,26 +33,37 @@ func GetRDSUsage(sess *session.Session, startTime, endTime time.Time) (RDSUsage 
 	if err != nil {
 		fmt.Println(err.Error())
 	} else {
-		RDSUsage["Instances"] = strconv.Itoa(len(respDescribeDBInstances.DBInstances))
+		count := len(respDescribeDBInstances.DBInstances)
+		if count > 0 {
+			RDSUsage["Instances"] = strconv.Itoa(count)
+		}
 	}
 
 	svcCloudWatch := cloudwatch.New(sess)
 
 	// Get CPU Usage
 	cpuUsage := getMetricsStatistics(svcCloudWatch, startTime, endTime, aws.String("AWS/RDS"), aws.String("CPUUtilization"), "Average", []*cloudwatch.Dimension{})[0]
-	RDSUsage["CPU"] = fmt.Sprintf("%0.2f%%", cpuUsage)
+	if cpuUsage > 0 {
+		RDSUsage["CPU"] = fmt.Sprintf("%0.2f%%", cpuUsage)
+	}
 
 	// Get Queries
 	queries := getMetricsStatistics(svcCloudWatch, startTime, endTime, aws.String("AWS/RDS"), aws.String("Queries"), "Average", []*cloudwatch.Dimension{})[0]
-	RDSUsage["Queries"] = fmt.Sprintf("%0.2f/Second", queries)
+	if queries > 0 {
+		RDSUsage["Queries"] = fmt.Sprintf("%0.2f/Second", queries)
+	}
 
 	// Get NetworkThroughput
 	throughput := getMetricsStatistics(svcCloudWatch, startTime, endTime, aws.String("AWS/RDS"), aws.String("NetworkThroughput"), "Average", []*cloudwatch.Dimension{})[0]
-	RDSUsage["NetworkThroughput"] = fmt.Sprintf("%s/Second", formatStorage(throughput))
+	if throughput > 0 {
+		RDSUsage["NetworkThroughput"] = fmt.Sprintf("%s/Second", formatStorage(throughput))
+	}
 
 	// Get Deadlocks
 	deadlocks := getMetricsStatistics(svcCloudWatch, startTime, endTime, aws.String("AWS/RDS"), aws.String("Deadlocks"), "Average", []*cloudwatch.Dimension{})[0]
-	RDSUsage["Deadlocks"] = fmt.Sprintf("%0.2f/Second", deadlocks)
+	if deadlocks > 0 {
+		RDSUsage["Deadlocks"] = fmt.Sprintf("%0.2f/Second", deadlocks)
+	}
 
 	return RDSUsage
 }

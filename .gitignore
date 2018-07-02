@@ -1,5 +1,4 @@
 vendor
 aws-slack-bot
-inventory
+run.sh
 docker-compose.yml
-glide.lock

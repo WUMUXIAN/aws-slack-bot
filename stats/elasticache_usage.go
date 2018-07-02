@@ -20,7 +20,11 @@ func GetElasticacheUsage(sess *session.Session, startTime, endTime time.Time) (e
 	if err != nil {
 		fmt.Println(err.Error())
 	} else {
-		elasticacheUsage["Replication Groups"] = strconv.Itoa(len(respDescribeReplicationGroups.ReplicationGroups))
+		count := len(respDescribeReplicationGroups.ReplicationGroups)
+		if count > 0 {
+			elasticacheUsage["Replication Groups"] = strconv.Itoa(count)
+		}
+
 	}
 
 	// List clusters
@@ -28,13 +32,18 @@ func GetElasticacheUsage(sess *session.Session, startTime, endTime time.Time) (e
 	if err != nil {
 		fmt.Println(err.Error())
 	} else {
-		elasticacheUsage["Clusters"] = strconv.Itoa(len(respDescribeCacheClusters.CacheClusters))
+		count := len(respDescribeCacheClusters.CacheClusters)
+		if count > 0 {
+			elasticacheUsage["Clusters"] = strconv.Itoa(count)
+		}
 		if len(respDescribeCacheClusters.CacheClusters) > 0 {
 			nodes := 0
 			for _, elasticacheCluster := range respDescribeCacheClusters.CacheClusters {
 				nodes += int(aws.Int64Value(elasticacheCluster.NumCacheNodes))
 			}
-			elasticacheUsage["Nodes"] = strconv.Itoa(nodes)
+			if nodes > 0 {
+				elasticacheUsage["Nodes"] = strconv.Itoa(nodes)
+			}
 		}
 
 	}
@@ -43,11 +52,15 @@ func GetElasticacheUsage(sess *session.Session, startTime, endTime time.Time) (e
 
 	// Get CPU Usage
 	cpuUsage := getMetricsStatistics(svcCloudWatch, startTime, endTime, aws.String("AWS/ElastiCache"), aws.String("CPUUtilization"), "Average", []*cloudwatch.Dimension{})[0]
-	elasticacheUsage["CPU"] = fmt.Sprintf("%0.2f%%", cpuUsage)
+	if cpuUsage > 0 {
+		elasticacheUsage["CPU"] = fmt.Sprintf("%0.2f%%", cpuUsage)
+	}
 
 	// Get Queries
 	bytes := getMetricsStatistics(svcCloudWatch, startTime, endTime, aws.String("AWS/ElastiCache"), aws.String("BytesUsedForCache"), "Average", []*cloudwatch.Dimension{})[0]
-	elasticacheUsage["Cache Size"] = formatStorage(bytes)
+	if bytes > 0 {
+		elasticacheUsage["Cache Size"] = formatStorage(bytes)
+	}
 
 	return elasticacheUsage
 }
