@@ -9,7 +9,7 @@
 
 # get the current version.
 current_version=$(git tag -l "releases/*" --sort=-v:refname | head -n 1)
-if [ "current_version" = "" ];then
+if [ "$current_version" = "" ];then
 	current_version="0.0.0"
 else
 	current_version=${current_version#"releases/v"}
@@ -48,6 +48,7 @@ hash=$(git rev-parse --verify --short HEAD)
 docker tag wumuxian/aws-slack-bot wumuxian/aws-slack-bot:v${new_version}
 
 echo "pushing images"
+docker push wumuxian/aws-slack-bot:latest
 docker push wumuxian/aws-slack-bot:v${new_version}
 
 # Cleanup
