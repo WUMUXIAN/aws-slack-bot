@@ -11,6 +11,9 @@ This bot is implemented in golang and is meant to send AWS Usage report to an in
 5. Elasticache Usage.
 6. Estimated Billing.
 
+![]("https://github.com/WUMUXIAN/aws-slack-bot/blob/master/screeningshots/part1.tiff")
+![]("https://github.com/WUMUXIAN/aws-slack-bot/blob/master/screeningshots/part2.tiff")
+
 You can specify any region(s) you want to watch and the frequency of reporting using `cron definition`
 
 ### Usage

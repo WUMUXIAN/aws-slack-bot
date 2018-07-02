@@ -34,6 +34,7 @@ func GetS3Usage(sess *session.Session, startTime, endTime time.Time) (s3Usage ma
 		Value: aws.String("StandardStorage"),
 	}
 
+	totalBytes := float64(0)
 	for _, bucket := range buckets {
 		demensions := []*cloudwatch.Dimension{
 			demensionStandardStorage,
@@ -44,7 +45,11 @@ func GetS3Usage(sess *session.Session, startTime, endTime time.Time) (s3Usage ma
 		sizeInBytes := getMetricsStatistics(svcCloudWatch, startTime, endTime, aws.String("AWS/S3"), aws.String("BucketSizeBytes"), "Sum", demensions)[0]
 		if sizeInBytes > 0 {
 			s3Usage[bucket] = formatStorage(sizeInBytes)
+			totalBytes += sizeInBytes
 		}
+	}
+	if totalBytes > 0 {
+		s3Usage["_total size_"] = formatStorage(totalBytes)
 	}
 
 	return s3Usage
