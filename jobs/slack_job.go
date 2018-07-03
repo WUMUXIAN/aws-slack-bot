@@ -105,7 +105,7 @@ func (o SlackJob) Run() {
 			usage.elasticacheUsageChan <- stats.GetElasticacheUsage(usage.Sess, firstDayOfMonth, lastDayOfMonth)
 		}()
 		go func() {
-			fmt.Println("Gather accumulated estimated billing for this month", firstDayOfMonth, lastDayOfMonth)
+			// fmt.Println("Gather accumulated estimated billing for this month", firstDayOfMonth, lastDayOfMonth)
 			month, average := stats.GetEstimatedBilling(usage.Sess, firstDayOfMonth, lastDayOfMonth)
 			usage.billingEstimationCurrentMonthChan <- []float64{month, average}
 		}()
@@ -113,35 +113,16 @@ func (o SlackJob) Run() {
 		firstDayOfLastMonth := firstDayOfMonth.AddDate(0, -1, 0)
 		lastDayOfLastMonth := firstDayOfLastMonth.AddDate(0, 1, 0).Add(-time.Second)
 		go func() {
-			fmt.Println("Gather accumulated estimated billing for last month", firstDayOfLastMonth, lastDayOfLastMonth)
+			// fmt.Println("Gather accumulated estimated billing for last month", firstDayOfLastMonth, lastDayOfLastMonth)
 			month, average := stats.GetEstimatedBilling(usage.Sess, firstDayOfLastMonth, lastDayOfLastMonth)
 			usage.billingEstimationLastMonthChan <- []float64{month, average}
 		}()
 
-		ec2Usage := <-usage.ec2UsageChan
-		if len(ec2Usage) > 0 {
-			ec2UsageMap[region] = ec2Usage
-		}
-
-		s3Usage := <-usage.s3UsageChan
-		if len(s3Usage) > 0 {
-			s3UsageMap[region] = s3Usage
-		}
-
-		cloudFrontUsage := <-usage.cloudFrontUsageChan
-		if len(cloudFrontUsage) > 0 {
-			cloudFrontUsageMap[region] = cloudFrontUsage
-		}
-
-		rdsUsage := <-usage.rdsUsageChan
-		if len(rdsUsage) > 0 {
-			rdsUsageMap[region] = rdsUsage
-		}
-
-		elasticacheUsage := <-usage.elasticacheUsageChan
-		if len(elasticacheUsage) > 0 {
-			elasticacheUsageMap[region] = elasticacheUsage
-		}
+		ec2UsageMap[region] = <-usage.ec2UsageChan
+		s3UsageMap[region] = <-usage.s3UsageChan
+		cloudFrontUsageMap[region] = <-usage.cloudFrontUsageChan
+		rdsUsageMap[region] = <-usage.rdsUsageChan
+		elasticacheUsageMap[region] = <-usage.elasticacheUsageChan
 
 		billingEstimation := <-usage.billingEstimationCurrentMonthChan
 		billingEstimationCurrentMonth[0] += billingEstimation[0]
@@ -161,10 +142,10 @@ func (o SlackJob) Run() {
 		Color:    "#D00000",
 		Fields:   make([]SlackAttachmentField, 0),
 	}
-	if len(ec2UsageMap) == 0 {
-		goto S3UsageReport
-	}
 	for region, ec2Usage := range ec2UsageMap {
+		if len(ec2Usage) == 0 {
+			continue
+		}
 		paritionRegion := parition.Regions()[region]
 		ec2UsageAttachment.Fields = append(ec2UsageAttachment.Fields, SlackAttachmentField{
 			Title: "",
@@ -175,7 +156,6 @@ func (o SlackJob) Run() {
 	}
 	slackAttachments = append(slackAttachments, ec2UsageAttachment)
 
-S3UsageReport:
 	// Add s3 usage
 	s3UsageAttachment := SlackAttachment{
 		Fallback: "S3 Usage",
@@ -183,10 +163,10 @@ S3UsageReport:
 		Color:    "#D00000",
 		Fields:   make([]SlackAttachmentField, 0),
 	}
-	if len(s3UsageMap) == 0 {
-		goto CloudFrontUsageReport
-	}
 	for region, s3Usage := range s3UsageMap {
+		if len(s3Usage) == 0 {
+			continue
+		}
 		paritionRegion := parition.Regions()[region]
 		s3UsageAttachment.Fields = append(s3UsageAttachment.Fields, SlackAttachmentField{
 			Title: "",
@@ -197,19 +177,17 @@ S3UsageReport:
 	}
 	slackAttachments = append(slackAttachments, s3UsageAttachment)
 
-CloudFrontUsageReport:
 	// Add cloudfront usage
-
 	cloudFrontUsageAttachment := SlackAttachment{
 		Fallback: "CloudFront Usage",
 		PreText:  "CloudFront Usage",
 		Color:    "#D00000",
 		Fields:   make([]SlackAttachmentField, 0),
 	}
-	if len(cloudFrontUsageMap) == 0 {
-		goto RDSUsageReport
-	}
 	for region, cloudFrontUsage := range cloudFrontUsageMap {
+		if len(cloudFrontUsage) == 0 {
+			continue
+		}
 		paritionRegion := parition.Regions()[region]
 		cloudFrontUsageAttachment.Fields = append(cloudFrontUsageAttachment.Fields, SlackAttachmentField{
 			Title: "",
@@ -220,19 +198,17 @@ CloudFrontUsageReport:
 	}
 	slackAttachments = append(slackAttachments, cloudFrontUsageAttachment)
 
-RDSUsageReport:
 	// Add RDS usage
-
 	rdsUsageAttachment := SlackAttachment{
 		Fallback: "RDS Usage",
 		PreText:  "RDS Usage",
 		Color:    "#D00000",
 		Fields:   make([]SlackAttachmentField, 0),
 	}
-	if len(rdsUsageMap) == 0 {
-		goto ElastiCacheUsageReport
-	}
 	for region, rdsUsage := range rdsUsageMap {
+		if len(rdsUsage) == 0 {
+			continue
+		}
 		paritionRegion := parition.Regions()[region]
 		rdsUsageAttachment.Fields = append(rdsUsageAttachment.Fields, SlackAttachmentField{
 			Title: "",
@@ -244,19 +220,17 @@ RDSUsageReport:
 
 	slackAttachments = append(slackAttachments, rdsUsageAttachment)
 
-ElastiCacheUsageReport:
 	// Add ElastiCache usage
-
 	elasticacheUsageAttachment := SlackAttachment{
 		Fallback: "Elasticache Usage",
 		PreText:  "Elasticache Usage",
 		Color:    "#D00000",
 		Fields:   make([]SlackAttachmentField, 0),
 	}
-	if len(elasticacheUsageMap) == 0 {
-		goto EstimatedBillingReport
-	}
 	for region, elasticacheUsage := range elasticacheUsageMap {
+		if len(elasticacheUsage) == 0 {
+			continue
+		}
 		paritionRegion := parition.Regions()[region]
 		elasticacheUsageAttachment.Fields = append(elasticacheUsageAttachment.Fields, SlackAttachmentField{
 			Title: "",
@@ -265,10 +239,8 @@ ElastiCacheUsageReport:
 		})
 		elasticacheUsageAttachment.Fields = append(elasticacheUsageAttachment.Fields, getSlackAttachmentFields(elasticacheUsage)...)
 	}
-
 	slackAttachments = append(slackAttachments, elasticacheUsageAttachment)
 
-EstimatedBillingReport:
 	// Add cost estimation
 	billingEstimationAttachment := SlackAttachment{
 		Fallback: "Estimated Billing",
@@ -299,9 +271,10 @@ EstimatedBillingReport:
 	slackAttachments = append(slackAttachments, billingEstimationAttachment)
 
 	slackAttachmentsBytes, _ := json.Marshal(SlackAttachments{Attacments: slackAttachments})
-	fmt.Println(string(slackAttachmentsBytes))
+	// fmt.Println(string(slackAttachmentsBytes))
 
 	// call slack webhook URL.
+	fmt.Println("Sending report to slack channel")
 	payload := strings.NewReader(string(slackAttachmentsBytes))
 	req, _ := http.NewRequest("POST", o.slackWebhookURL, payload)
 	req.Header.Add("content-type", "application/json")

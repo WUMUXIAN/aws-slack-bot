@@ -48,6 +48,8 @@ func GetEstimatedBilling(sess *session.Session, startTime, endTime time.Time) (l
 	json.Unmarshal(jsonBody, &result)
 	sort.Sort(result.Datapoints)
 
+	// fmt.Println("Billing Datapoints:", result.Datapoints)
+
 	if len(result.Datapoints) > 0 {
 		latest = result.Datapoints[0].Maximum
 		length := len(result.Datapoints)

@@ -38,7 +38,7 @@ func GetS3Usage(sess *session.Session, startTime, endTime time.Time) (s3Usage ma
 	for _, bucket := range buckets {
 		demensions := []*cloudwatch.Dimension{
 			demensionStandardStorage,
-			&cloudwatch.Dimension{
+			{
 				Name:  aws.String("BucketName"),
 				Value: aws.String(bucket),
 			}}
