@@ -3,9 +3,6 @@ language: go
 go:
   - "1.9.x"
 
-services:
-  - aws-slack-bot
-
 install:
   - go get -v github.com/aws/aws-sdk-go
   - go get -v github.com/robfig/cron
