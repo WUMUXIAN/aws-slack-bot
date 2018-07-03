@@ -12,7 +12,7 @@ import (
 )
 
 // GetEstimatedBilling calculates estimated billing for given session within specified period of time
-func GetEstimatedBilling(sess *session.Session, startTime, endTime time.Time) (latest float64, latestDiff float64) {
+func GetEstimatedBilling(sess *session.Session, startTime, endTime time.Time) (latest float64, average float64) {
 	svc := cloudwatch.New(sess)
 
 	// fmt.Println("Start time: ", startTime)
@@ -48,16 +48,10 @@ func GetEstimatedBilling(sess *session.Session, startTime, endTime time.Time) (l
 	json.Unmarshal(jsonBody, &result)
 	sort.Sort(result.Datapoints)
 
-	// fmt.Println(result.Datapoints)
-
 	if len(result.Datapoints) > 0 {
 		latest = result.Datapoints[0].Maximum
-
-		if len(result.Datapoints) > 1 && latest > result.Datapoints[1].Maximum {
-			latestDiff = latest - result.Datapoints[1].Maximum
-		} else {
-			latestDiff = latest
-		}
+		length := len(result.Datapoints)
+		average = result.Datapoints[0].Maximum / float64(length)
 	}
 	return
 }

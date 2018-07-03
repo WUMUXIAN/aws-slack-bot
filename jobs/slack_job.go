@@ -23,9 +23,8 @@ type RegionUsage struct {
 	cloudFrontUsageChan               chan map[string]string
 	elasticacheUsageChan              chan map[string]string
 	rdsUsageChan                      chan map[string]string
-	billingEstimationCurrentMonthChan chan float64
-	billingEstimationYesterdayChan    chan float64
-	billingEstimationLastMonthChan    chan float64
+	billingEstimationCurrentMonthChan chan []float64
+	billingEstimationLastMonthChan    chan []float64
 }
 
 // SlackJob defines a slack cron job
@@ -49,9 +48,8 @@ func NewSlackJob(regions []string, webhookURL string) SlackJob {
 			cloudFrontUsageChan:               make(chan map[string]string),
 			elasticacheUsageChan:              make(chan map[string]string),
 			rdsUsageChan:                      make(chan map[string]string),
-			billingEstimationCurrentMonthChan: make(chan float64),
-			billingEstimationYesterdayChan:    make(chan float64),
-			billingEstimationLastMonthChan:    make(chan float64),
+			billingEstimationCurrentMonthChan: make(chan []float64),
+			billingEstimationLastMonthChan:    make(chan []float64),
 		}
 	}
 	return slackJob
@@ -66,9 +64,8 @@ func (o SlackJob) Run() {
 	cloudFrontUsageMap := make(map[string]map[string]string)
 	rdsUsageMap := make(map[string]map[string]string)
 	elasticacheUsageMap := make(map[string]map[string]string)
-	billingEstimationCurrentMonth := float64(0)
-	billingEstimationYesterday := float64(0)
-	billingEstimationLastMonth := float64(0)
+	billingEstimationCurrentMonth := []float64{0, 0}
+	billingEstimationLastMonth := []float64{0, 0}
 
 	parition := endpoints.AwsPartition()
 
@@ -78,7 +75,7 @@ func (o SlackJob) Run() {
 		}()
 
 		now := time.Now().UTC()
-		currentYear, currentMonth, currentDay := now.Date()
+		currentYear, currentMonth, _ := now.Date()
 		currentLocation := now.Location()
 		firstDayOfMonth := time.Date(currentYear, currentMonth, 1, 0, 0, 0, 0, currentLocation)
 		lastDayOfMonth := firstDayOfMonth.AddDate(0, 1, 0).Add(-time.Second)
@@ -95,22 +92,17 @@ func (o SlackJob) Run() {
 			usage.elasticacheUsageChan <- stats.GetElasticacheUsage(usage.Sess, firstDayOfMonth, lastDayOfMonth)
 		}()
 		go func() {
-			month, _ := stats.GetEstimatedBilling(usage.Sess, firstDayOfMonth, lastDayOfMonth)
-			usage.billingEstimationCurrentMonthChan <- month
+			fmt.Println("Gather acculumated estimated billing for this month", firstDayOfMonth, lastDayOfMonth)
+			month, average := stats.GetEstimatedBilling(usage.Sess, firstDayOfMonth, lastDayOfMonth)
+			usage.billingEstimationCurrentMonthChan <- []float64{month, average}
 		}()
 
 		firstDayOfLastMonth := firstDayOfMonth.AddDate(0, -1, 0)
 		lastDayOfLastMonth := firstDayOfLastMonth.AddDate(0, 1, 0).Add(-time.Second)
 		go func() {
-			month, _ := stats.GetEstimatedBilling(usage.Sess, firstDayOfLastMonth, lastDayOfLastMonth)
-			usage.billingEstimationLastMonthChan <- month
-		}()
-
-		endOfToday := time.Date(currentYear, currentMonth, currentDay, 0, 0, 0, 0, currentLocation).AddDate(0, 0, 1).Add(-time.Second)
-		startOfYesterday := time.Date(currentYear, currentMonth, currentDay, 0, 0, 0, 0, currentLocation).AddDate(0, 0, -1)
-		go func() {
-			_, day := stats.GetEstimatedBilling(usage.Sess, startOfYesterday, endOfToday)
-			usage.billingEstimationYesterdayChan <- day
+			fmt.Println("Gather estimated billing for last month", firstDayOfLastMonth, lastDayOfLastMonth)
+			month, average := stats.GetEstimatedBilling(usage.Sess, firstDayOfLastMonth, lastDayOfLastMonth)
+			usage.billingEstimationLastMonthChan <- []float64{month, average}
 		}()
 
 		ec2Usage := <-usage.ec2UsageChan
@@ -138,150 +130,167 @@ func (o SlackJob) Run() {
 			elasticacheUsageMap[region] = elasticacheUsage
 		}
 
-		billingEstimationCurrentMonth += <-usage.billingEstimationCurrentMonthChan
-		billingEstimationLastMonth += <-usage.billingEstimationLastMonthChan
-		billingEstimationYesterday += <-usage.billingEstimationYesterdayChan
+		billingEstimation := <-usage.billingEstimationCurrentMonthChan
+		billingEstimationCurrentMonth[0] += billingEstimation[0]
+		billingEstimationCurrentMonth[1] += billingEstimation[1]
+
+		billingEstimation = <-usage.billingEstimationLastMonthChan
+		billingEstimationLastMonth[0] += billingEstimation[0]
+		billingEstimationLastMonth[1] += billingEstimation[1]
 	}
 
 	slackAttachments := make([]SlackAttachment, 0)
 
 	// Add ec2 usage
-	if len(ec2UsageMap) > 0 {
-		ec2UsageAttachment := SlackAttachment{
-			Fallback: "EC2 Usage",
-			PreText:  "EC2 Usage",
-			Color:    "#D00000",
-			Fields:   make([]SlackAttachmentField, 0),
-		}
-		for region, ec2Usage := range ec2UsageMap {
-			paritionRegion := parition.Regions()[region]
+	ec2UsageAttachment := SlackAttachment{
+		Fallback: "EC2 Usage",
+		PreText:  "EC2 Usage",
+		Color:    "#D00000",
+		Fields:   make([]SlackAttachmentField, 0),
+	}
+	if len(ec2UsageMap) == 0 {
+		goto S3UsageReport
+	}
+	for region, ec2Usage := range ec2UsageMap {
+		paritionRegion := parition.Regions()[region]
+		ec2UsageAttachment.Fields = append(ec2UsageAttachment.Fields, SlackAttachmentField{
+			Title: "",
+			Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
+			Short: false,
+		})
+		ec2UsageKeys := stats.GetSortedKeySlice(ec2Usage)
+		for _, key := range ec2UsageKeys {
 			ec2UsageAttachment.Fields = append(ec2UsageAttachment.Fields, SlackAttachmentField{
-				Title: "",
-				Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
-				Short: false,
+				Title: key,
+				Value: ec2Usage[key],
+				Short: true,
 			})
-			ec2UsageKeys := stats.GetSortedKeySlice(ec2Usage)
-			for _, key := range ec2UsageKeys {
-				ec2UsageAttachment.Fields = append(ec2UsageAttachment.Fields, SlackAttachmentField{
-					Title: key,
-					Value: ec2Usage[key],
-					Short: true,
-				})
-			}
 		}
-		slackAttachments = append(slackAttachments, ec2UsageAttachment)
 	}
+	slackAttachments = append(slackAttachments, ec2UsageAttachment)
 
+S3UsageReport:
 	// Add s3 usage
-	if len(s3UsageMap) > 0 {
-		s3UsageAttachment := SlackAttachment{
-			Fallback: "S3 Usage",
-			PreText:  "S3 Usage",
-			Color:    "#D00000",
-			Fields:   make([]SlackAttachmentField, 0),
-		}
-		for region, s3Usage := range s3UsageMap {
-			paritionRegion := parition.Regions()[region]
+	s3UsageAttachment := SlackAttachment{
+		Fallback: "S3 Usage",
+		PreText:  "S3 Usage",
+		Color:    "#D00000",
+		Fields:   make([]SlackAttachmentField, 0),
+	}
+	if len(s3UsageMap) == 0 {
+		goto CloudFrontUsageReport
+	}
+	for region, s3Usage := range s3UsageMap {
+		paritionRegion := parition.Regions()[region]
+		s3UsageAttachment.Fields = append(s3UsageAttachment.Fields, SlackAttachmentField{
+			Title: "",
+			Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
+			Short: false,
+		})
+		s3UsageKeys := stats.GetSortedKeySlice(s3Usage)
+		for _, key := range s3UsageKeys {
 			s3UsageAttachment.Fields = append(s3UsageAttachment.Fields, SlackAttachmentField{
-				Title: "",
-				Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
-				Short: false,
+				Title: key,
+				Value: s3Usage[key],
+				Short: true,
 			})
-			s3UsageKeys := stats.GetSortedKeySlice(s3Usage)
-			for _, key := range s3UsageKeys {
-				s3UsageAttachment.Fields = append(s3UsageAttachment.Fields, SlackAttachmentField{
-					Title: key,
-					Value: s3Usage[key],
-					Short: true,
-				})
-			}
 		}
-		slackAttachments = append(slackAttachments, s3UsageAttachment)
 	}
+	slackAttachments = append(slackAttachments, s3UsageAttachment)
 
+CloudFrontUsageReport:
 	// Add cloudfront usage
-	if len(cloudFrontUsageMap) > 0 {
-		cloudFrontUsageAttachment := SlackAttachment{
-			Fallback: "CloudFront Usage",
-			PreText:  "CloudFront Usage",
-			Color:    "#D00000",
-			Fields:   make([]SlackAttachmentField, 0),
-		}
-		for region, cloudFrontUsage := range cloudFrontUsageMap {
-			paritionRegion := parition.Regions()[region]
+
+	cloudFrontUsageAttachment := SlackAttachment{
+		Fallback: "CloudFront Usage",
+		PreText:  "CloudFront Usage",
+		Color:    "#D00000",
+		Fields:   make([]SlackAttachmentField, 0),
+	}
+	if len(cloudFrontUsageMap) == 0 {
+		goto RDSUsageReport
+	}
+	for region, cloudFrontUsage := range cloudFrontUsageMap {
+		paritionRegion := parition.Regions()[region]
+		cloudFrontUsageAttachment.Fields = append(cloudFrontUsageAttachment.Fields, SlackAttachmentField{
+			Title: "",
+			Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
+			Short: false,
+		})
+		cloudFrontUsageKeys := stats.GetSortedKeySlice(cloudFrontUsage)
+		for _, key := range cloudFrontUsageKeys {
 			cloudFrontUsageAttachment.Fields = append(cloudFrontUsageAttachment.Fields, SlackAttachmentField{
-				Title: "",
-				Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
-				Short: false,
+				Title: key,
+				Value: cloudFrontUsage[key],
+				Short: true,
 			})
-			cloudFrontUsageKeys := stats.GetSortedKeySlice(cloudFrontUsage)
-			for _, key := range cloudFrontUsageKeys {
-				cloudFrontUsageAttachment.Fields = append(cloudFrontUsageAttachment.Fields, SlackAttachmentField{
-					Title: key,
-					Value: cloudFrontUsage[key],
-					Short: true,
-				})
-			}
 		}
-		slackAttachments = append(slackAttachments, cloudFrontUsageAttachment)
 	}
+	slackAttachments = append(slackAttachments, cloudFrontUsageAttachment)
 
+RDSUsageReport:
 	// Add RDS usage
-	if len(rdsUsageMap) > 0 {
-		rdsUsageAttachment := SlackAttachment{
-			Fallback: "RDS Usage",
-			PreText:  "RDS Usage",
-			Color:    "#D00000",
-			Fields:   make([]SlackAttachmentField, 0),
-		}
-		for region, rdsUsage := range rdsUsageMap {
-			paritionRegion := parition.Regions()[region]
+
+	rdsUsageAttachment := SlackAttachment{
+		Fallback: "RDS Usage",
+		PreText:  "RDS Usage",
+		Color:    "#D00000",
+		Fields:   make([]SlackAttachmentField, 0),
+	}
+	if len(rdsUsageMap) == 0 {
+		goto ElastiCacheUsageReport
+	}
+	for region, rdsUsage := range rdsUsageMap {
+		paritionRegion := parition.Regions()[region]
+		rdsUsageAttachment.Fields = append(rdsUsageAttachment.Fields, SlackAttachmentField{
+			Title: "",
+			Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
+			Short: false,
+		})
+		rdsUsageKeys := stats.GetSortedKeySlice(rdsUsage)
+		for _, key := range rdsUsageKeys {
 			rdsUsageAttachment.Fields = append(rdsUsageAttachment.Fields, SlackAttachmentField{
-				Title: "",
-				Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
-				Short: false,
+				Title: key,
+				Value: rdsUsage[key],
+				Short: true,
 			})
-			rdsUsageKeys := stats.GetSortedKeySlice(rdsUsage)
-			for _, key := range rdsUsageKeys {
-				rdsUsageAttachment.Fields = append(rdsUsageAttachment.Fields, SlackAttachmentField{
-					Title: key,
-					Value: rdsUsage[key],
-					Short: true,
-				})
-			}
 		}
-
-		slackAttachments = append(slackAttachments, rdsUsageAttachment)
 	}
 
+	slackAttachments = append(slackAttachments, rdsUsageAttachment)
+
+ElastiCacheUsageReport:
 	// Add ElastiCache usage
-	if len(elasticacheUsageMap) > 0 {
-		elasticacheUsageAttachment := SlackAttachment{
-			Fallback: "Elasticache Usage",
-			PreText:  "Elasticache Usage",
-			Color:    "#D00000",
-			Fields:   make([]SlackAttachmentField, 0),
-		}
-		for region, elasticacheUsage := range elasticacheUsageMap {
-			paritionRegion := parition.Regions()[region]
-			elasticacheUsageAttachment.Fields = append(elasticacheUsageAttachment.Fields, SlackAttachmentField{
-				Title: "",
-				Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
-				Short: false,
-			})
-			elasticacheUsageKeys := stats.GetSortedKeySlice(elasticacheUsage)
-			for _, key := range elasticacheUsageKeys {
-				elasticacheUsageAttachment.Fields = append(elasticacheUsageAttachment.Fields, SlackAttachmentField{
-					Title: key,
-					Value: elasticacheUsage[key],
-					Short: true,
-				})
-			}
-		}
 
-		slackAttachments = append(slackAttachments, elasticacheUsageAttachment)
+	elasticacheUsageAttachment := SlackAttachment{
+		Fallback: "Elasticache Usage",
+		PreText:  "Elasticache Usage",
+		Color:    "#D00000",
+		Fields:   make([]SlackAttachmentField, 0),
+	}
+	if len(elasticacheUsageMap) == 0 {
+		goto EstimatedBillingReport
+	}
+	for region, elasticacheUsage := range elasticacheUsageMap {
+		paritionRegion := parition.Regions()[region]
+		elasticacheUsageAttachment.Fields = append(elasticacheUsageAttachment.Fields, SlackAttachmentField{
+			Title: "",
+			Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
+			Short: false,
+		})
+		elasticacheUsageKeys := stats.GetSortedKeySlice(elasticacheUsage)
+		for _, key := range elasticacheUsageKeys {
+			elasticacheUsageAttachment.Fields = append(elasticacheUsageAttachment.Fields, SlackAttachmentField{
+				Title: key,
+				Value: elasticacheUsage[key],
+				Short: true,
+			})
+		}
 	}
 
+	slackAttachments = append(slackAttachments, elasticacheUsageAttachment)
+
+EstimatedBillingReport:
 	// Add cost estimation
 	billingEstimationAttachment := SlackAttachment{
 		Fallback: "Estimated Billing",
@@ -290,18 +299,23 @@ func (o SlackJob) Run() {
 		Fields:   make([]SlackAttachmentField, 0),
 	}
 	billingEstimationAttachment.Fields = append(billingEstimationAttachment.Fields, SlackAttachmentField{
-		Title: "For Yesterday",
-		Value: fmt.Sprintf("$%.02f USD", billingEstimationYesterday),
-		Short: false,
-	})
-	billingEstimationAttachment.Fields = append(billingEstimationAttachment.Fields, SlackAttachmentField{
-		Title: "Accumulated This Month",
-		Value: fmt.Sprintf("$%.02f USD", billingEstimationCurrentMonth),
+		Title: "Daily Average This Month",
+		Value: fmt.Sprintf("$%.02f USD", billingEstimationCurrentMonth[1]),
 		Short: true,
 	})
 	billingEstimationAttachment.Fields = append(billingEstimationAttachment.Fields, SlackAttachmentField{
-		Title: "Total Last Month",
-		Value: fmt.Sprintf("$%.02f USD", billingEstimationLastMonth),
+		Title: "Accumulated This Month",
+		Value: fmt.Sprintf("$%.02f USD", billingEstimationCurrentMonth[0]),
+		Short: true,
+	})
+	billingEstimationAttachment.Fields = append(billingEstimationAttachment.Fields, SlackAttachmentField{
+		Title: "Daily Average Last Month",
+		Value: fmt.Sprintf("$%.02f USD", billingEstimationLastMonth[1]),
+		Short: true,
+	})
+	billingEstimationAttachment.Fields = append(billingEstimationAttachment.Fields, SlackAttachmentField{
+		Title: "Accumulated Last Month",
+		Value: fmt.Sprintf("$%.02f USD", billingEstimationLastMonth[0]),
 		Short: true,
 	})
 	slackAttachments = append(slackAttachments, billingEstimationAttachment)
