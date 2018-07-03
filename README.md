@@ -21,7 +21,7 @@ You can specify any region(s) you want to watch and the frequency of reporting u
 ### Usage
 
 The application is release via `Docker`, which can be found here: https://hub.docker.com/r/wumuxian/aws-slack-bot/
-Choose a version to use, currently the latest version is `wumuxian/aws-slack-bot:v0.0.1`
+Choose a version to use, currently the latest version is `wumuxian/aws-slack-bot:v0.0.2`
 
 You need to set the following parameters to make it work.
 
@@ -55,7 +55,7 @@ docker run -d \
   -e SLACK_WEBHOOK_URL="" \
   -e CRON_DEFINITION="0/5 * * * * ?" \
   -e REGIONS="us-east-1,ap-southeast-1" \
-  --name aws-slack-bot wumuxian/aws-slack-bot:v0.0.1
+  --name aws-slack-bot wumuxian/aws-slack-bot:v0.0.2
 ```
 
 ### Development
