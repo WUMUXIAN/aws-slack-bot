@@ -51,6 +51,5 @@ func GetS3Usage(sess *session.Session, startTime, endTime time.Time) (s3Usage ma
 	if totalBytes > 0 {
 		s3Usage["_total size_"] = formatStorage(totalBytes)
 	}
-
 	return s3Usage
 }

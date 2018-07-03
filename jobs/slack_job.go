@@ -55,6 +55,19 @@ func NewSlackJob(regions []string, webhookURL string) SlackJob {
 	return slackJob
 }
 
+func getSlackAttachmentFields(m map[string]string) []SlackAttachmentField {
+	fields := make([]SlackAttachmentField, 0)
+	keys := stats.GetSortedKeySlice(m)
+	for _, key := range keys {
+		fields = append(fields, SlackAttachmentField{
+			Title: key,
+			Value: m[key],
+			Short: true,
+		})
+	}
+	return fields
+}
+
 // Run runs the slack cron job.
 func (o SlackJob) Run() {
 	// Get EC2 usage for current session
@@ -92,7 +105,7 @@ func (o SlackJob) Run() {
 			usage.elasticacheUsageChan <- stats.GetElasticacheUsage(usage.Sess, firstDayOfMonth, lastDayOfMonth)
 		}()
 		go func() {
-			fmt.Println("Gather acculumated estimated billing for this month", firstDayOfMonth, lastDayOfMonth)
+			fmt.Println("Gather accumulated estimated billing for this month", firstDayOfMonth, lastDayOfMonth)
 			month, average := stats.GetEstimatedBilling(usage.Sess, firstDayOfMonth, lastDayOfMonth)
 			usage.billingEstimationCurrentMonthChan <- []float64{month, average}
 		}()
@@ -100,7 +113,7 @@ func (o SlackJob) Run() {
 		firstDayOfLastMonth := firstDayOfMonth.AddDate(0, -1, 0)
 		lastDayOfLastMonth := firstDayOfLastMonth.AddDate(0, 1, 0).Add(-time.Second)
 		go func() {
-			fmt.Println("Gather estimated billing for last month", firstDayOfLastMonth, lastDayOfLastMonth)
+			fmt.Println("Gather accumulated estimated billing for last month", firstDayOfLastMonth, lastDayOfLastMonth)
 			month, average := stats.GetEstimatedBilling(usage.Sess, firstDayOfLastMonth, lastDayOfLastMonth)
 			usage.billingEstimationLastMonthChan <- []float64{month, average}
 		}()
@@ -158,14 +171,7 @@ func (o SlackJob) Run() {
 			Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
 			Short: false,
 		})
-		ec2UsageKeys := stats.GetSortedKeySlice(ec2Usage)
-		for _, key := range ec2UsageKeys {
-			ec2UsageAttachment.Fields = append(ec2UsageAttachment.Fields, SlackAttachmentField{
-				Title: key,
-				Value: ec2Usage[key],
-				Short: true,
-			})
-		}
+		ec2UsageAttachment.Fields = append(ec2UsageAttachment.Fields, getSlackAttachmentFields(ec2Usage)...)
 	}
 	slackAttachments = append(slackAttachments, ec2UsageAttachment)
 
@@ -187,14 +193,7 @@ S3UsageReport:
 			Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
 			Short: false,
 		})
-		s3UsageKeys := stats.GetSortedKeySlice(s3Usage)
-		for _, key := range s3UsageKeys {
-			s3UsageAttachment.Fields = append(s3UsageAttachment.Fields, SlackAttachmentField{
-				Title: key,
-				Value: s3Usage[key],
-				Short: true,
-			})
-		}
+		s3UsageAttachment.Fields = append(s3UsageAttachment.Fields, getSlackAttachmentFields(s3Usage)...)
 	}
 	slackAttachments = append(slackAttachments, s3UsageAttachment)
 
@@ -217,14 +216,7 @@ CloudFrontUsageReport:
 			Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
 			Short: false,
 		})
-		cloudFrontUsageKeys := stats.GetSortedKeySlice(cloudFrontUsage)
-		for _, key := range cloudFrontUsageKeys {
-			cloudFrontUsageAttachment.Fields = append(cloudFrontUsageAttachment.Fields, SlackAttachmentField{
-				Title: key,
-				Value: cloudFrontUsage[key],
-				Short: true,
-			})
-		}
+		cloudFrontUsageAttachment.Fields = append(cloudFrontUsageAttachment.Fields, getSlackAttachmentFields(cloudFrontUsage)...)
 	}
 	slackAttachments = append(slackAttachments, cloudFrontUsageAttachment)
 
@@ -247,14 +239,7 @@ RDSUsageReport:
 			Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
 			Short: false,
 		})
-		rdsUsageKeys := stats.GetSortedKeySlice(rdsUsage)
-		for _, key := range rdsUsageKeys {
-			rdsUsageAttachment.Fields = append(rdsUsageAttachment.Fields, SlackAttachmentField{
-				Title: key,
-				Value: rdsUsage[key],
-				Short: true,
-			})
-		}
+		rdsUsageAttachment.Fields = append(rdsUsageAttachment.Fields, getSlackAttachmentFields(rdsUsage)...)
 	}
 
 	slackAttachments = append(slackAttachments, rdsUsageAttachment)
@@ -278,14 +263,7 @@ ElastiCacheUsageReport:
 			Value: fmt.Sprintf("_&lt;%s: %s&gt;_", paritionRegion.Description(), region),
 			Short: false,
 		})
-		elasticacheUsageKeys := stats.GetSortedKeySlice(elasticacheUsage)
-		for _, key := range elasticacheUsageKeys {
-			elasticacheUsageAttachment.Fields = append(elasticacheUsageAttachment.Fields, SlackAttachmentField{
-				Title: key,
-				Value: elasticacheUsage[key],
-				Short: true,
-			})
-		}
+		elasticacheUsageAttachment.Fields = append(elasticacheUsageAttachment.Fields, getSlackAttachmentFields(elasticacheUsage)...)
 	}
 
 	slackAttachments = append(slackAttachments, elasticacheUsageAttachment)
