@@ -1,0 +1,21 @@
+language: go
+
+go:
+  - "1.9.x"
+
+services:
+  - aws-slack-bot
+
+install:
+  - go get -v github.com/aws/aws-sdk-go
+  - go get -v github.com/robfig/cron
+
+script:
+  - go test -v ./...
+
+notifications:
+  email:
+    recipients:
+      - wumuxian1988@gmail.com
+    on_success: never # default: change
+    on_failure: always # default: always
