@@ -57,3 +57,9 @@ echo $images
 if [ "$images" != "" ]; then
     docker rmi $images
 fi
+
+images=$(docker images -qa wumuxian/aws-slack-bot --filter before=wumuxian/aws-slack-bot:latest)
+echo $images
+if [ "$images" != "" ]; then
+    docker rmi $images
+fi
